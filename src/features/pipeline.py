@@ -10,6 +10,7 @@ from src.data.loader import load_raw_data
 from src.data.cleaner import clean
 from src.features.icd_grouper import add_icd_groups
 from src.features.engineer import engineer_features
+from src.features.elixhauser import calculate_elixhauser_score
 from src.data.splitter import split_data
 
 from src.utils.config import (
@@ -94,6 +95,9 @@ def get_processed_data(model_type: str = "xgb"):
     
     # 4. Engineer features
     df = engineer_features(df)
+    
+    # 4.5 Add Elixhauser Score
+    df = calculate_elixhauser_score(df)
     
     # Check that all required columns exist before splitting
     required_cols = NUMERIC_FEATURES + CATEGORICAL_FEATURES + BINARY_FEATURES + [TARGET_BINARY_COL]

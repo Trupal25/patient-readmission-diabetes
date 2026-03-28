@@ -79,6 +79,7 @@ NUMERIC_FEATURES = [
     "total_prior_visits",
     "num_active_medications",
     "insulin_intensity",
+    "elixhauser_score",
 ]
 
 CATEGORICAL_FEATURES = [
