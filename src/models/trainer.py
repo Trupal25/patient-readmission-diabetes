@@ -2,6 +2,7 @@ import logging
 import json
 import joblib
 import optuna
+import mlflow
 import numpy as np
 from xgboost import XGBClassifier
 from typing import Dict, Any
@@ -138,19 +139,34 @@ def retrain_and_save_optimized_model(best_params: Dict[str, Any]):
     })
     
     model = XGBClassifier(**model_params)
-    model.fit(
-        X_train, y_train,
-        eval_set=[(X_val, y_val)],
-        verbose=100
-    )
-    
-    y_val_proba = model.predict_proba(X_val)[:, 1]
-    logger.info(f"Final Retrained Validation AUROC: {roc_auc_score(y_val, y_val_proba):.4f}")
-    logger.info(f"Final Retrained Validation AUPRC: {average_precision_score(y_val, y_val_proba):.4f}")
-    
-    out_path = MODELS_DIR / "xgboost_optimized.joblib"
-    joblib.dump(model, out_path)
-    logger.info(f"Saved optimized XGBoost model to {out_path}")
+    mlflow.set_experiment("Patient_Readmission_Models")
+    with mlflow.start_run(run_name="XGBoost_Optimized"):
+        model.fit(
+            X_train, y_train,
+            eval_set=[(X_val, y_val)],
+            verbose=100
+        )
+        
+        y_val_proba = model.predict_proba(X_val)[:, 1]
+        val_auroc = roc_auc_score(y_val, y_val_proba)
+        val_auprc = average_precision_score(y_val, y_val_proba)
+        
+        logger.info(f"Final Retrained Validation AUROC: {val_auroc:.4f}")
+        logger.info(f"Final Retrained Validation AUPRC: {val_auprc:.4f}")
+        
+        # Log to MLflow
+        mlflow.log_params(model_params)
+        mlflow.log_metrics({
+            "val_auroc": val_auroc,
+            "val_auprc": val_auprc,
+            "best_iteration": getattr(model, "best_iteration", 0)
+        })
+        
+        mlflow.xgboost.log_model(model, "xgboost_model")
+        
+        out_path = MODELS_DIR / "xgboost_optimized.joblib"
+        joblib.dump(model, out_path)
+        logger.info(f"Saved optimized XGBoost model to {out_path}")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")

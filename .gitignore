@@ -8,3 +8,4 @@ dataset_diabetes/*.csv
 .venv/
 venv/
 env/
+mlruns/
