@@ -3,13 +3,16 @@ import logging
 from typing import Tuple
 from sklearn.model_selection import train_test_split
 
-from src.utils.config import TEST_SIZE, VAL_SIZE, RANDOM_STATE, TARGET_BINARY_COL
+import json
+from pathlib import Path
+from src.utils.config import TEST_SIZE, VAL_SIZE, RANDOM_STATE, TARGET_BINARY_COL, METRICS_DIR
 
 logger = logging.getLogger(__name__)
 
 def split_data(
     df: pd.DataFrame, 
-    target_col: str = TARGET_BINARY_COL
+    target_col: str = TARGET_BINARY_COL,
+    save_indices: bool = True
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.Series]:
     """
     Splits the dataframe into Train (70%), Validation (15%), and Test (15%) sets
@@ -54,5 +57,16 @@ def split_data(
     logger.info(f"Train size: {len(X_train)} ({len(X_train)/len(df):.1%}) - Posatives: {y_train.mean():.1%}")
     logger.info(f"Val size:   {len(X_val)} ({len(X_val)/len(df):.1%}) - Posatives: {y_val.mean():.1%}")
     logger.info(f"Test size:  {len(X_test)} ({len(X_test)/len(df):.1%}) - Posatives: {y_test.mean():.1%}")
+    
+    if save_indices:
+        indices = {
+            "train": X_train.index.tolist(),
+            "val": X_val.index.tolist(),
+            "test": X_test.index.tolist()
+        }
+        out_path = METRICS_DIR / "split_indices.json"
+        with open(out_path, "w") as f:
+            json.dump(indices, f)
+        logger.info(f"Saved split indices to {out_path}")
     
     return X_train, X_val, X_test, y_train, y_val, y_test

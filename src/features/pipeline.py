@@ -7,7 +7,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder, OrdinalEncoder
 
 from src.data.loader import load_raw_data
-from src.data.cleaner import clean_data
+from src.data.cleaner import clean
 from src.features.icd_grouper import add_icd_groups
 from src.features.engineer import engineer_features
 from src.data.splitter import split_data
@@ -87,7 +87,7 @@ def get_processed_data(model_type: str = "xgb"):
     df = load_raw_data(decode_ids=False)
     
     # 2. Clean data
-    df = clean_data(df)
+    df = clean(df)
     
     # 3. Add ICD groups
     df = add_icd_groups(df)

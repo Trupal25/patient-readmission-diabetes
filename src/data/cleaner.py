@@ -6,7 +6,7 @@ from src.utils.config import DECEASED_DISPOSITION_IDS
 
 logger = logging.getLogger(__name__)
 
-def clean_data(df: pd.DataFrame) -> pd.DataFrame:
+def clean(df: pd.DataFrame) -> pd.DataFrame:
     """
     Cleans the raw diabetic dataset according to EDA findings.
     - Replaces '?' with NaN
