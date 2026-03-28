@@ -1,4 +1,5 @@
-models/*.joblib
+models/*
+!models/.gitkeep
 reports/
 __pycache__
 .env
