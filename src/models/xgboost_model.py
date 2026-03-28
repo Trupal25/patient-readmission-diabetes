@@ -21,16 +21,12 @@ def train_initial_xgboost() -> Tuple[XGBClassifier, Dict[str, float]]:
     # 1. Load data processed specifically for XGBoost (OrdinalEncoder, Passthrough numeric)
     X_train, X_val, _, y_train, y_val, _, feature_names, _ = get_processed_data(model_type="xgb")
     
-    # 2. Setup class weight
-    # Class imbalance: positive ~ 9.0%, so n_neg / n_pos is roughly ~10
-    # The plan says scale_pos_weight = 8
-    scale_pos_weight = 8.0
+    # 2. Setup class weight - Removed scale_pos_weight because SMOTENC balances the pipeline 1:1 natively.
     
     # 3. Initialize Model with default params from implementation plan
     model = XGBClassifier(
         objective='binary:logistic',
         eval_metric='aucpr', # Use precision-recall curve for trees natively
-        scale_pos_weight=scale_pos_weight,
         max_depth=6,
         learning_rate=0.1,
         n_estimators=300,

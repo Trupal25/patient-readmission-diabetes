@@ -34,7 +34,6 @@ def optimize_hyperparameters(n_trials: int = 50) -> Dict[str, Any]:
             'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
             'reg_alpha': trial.suggest_float('reg_alpha', 1e-3, 10.0, log=True),
             'reg_lambda': trial.suggest_float('reg_lambda', 1e-3, 10.0, log=True),
-            'scale_pos_weight': trial.suggest_float('scale_pos_weight', 5.0, 15.0),
             'gamma': trial.suggest_float('gamma', 0.0, 5.0),
             'random_state': 42,
             # we'll use a fixed value to not clutter trial space, or just use pruning:

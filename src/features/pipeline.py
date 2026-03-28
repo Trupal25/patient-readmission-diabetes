@@ -12,12 +12,14 @@ from src.features.icd_grouper import add_icd_groups
 from src.features.engineer import engineer_features
 from src.features.elixhauser import calculate_elixhauser_score
 from src.data.splitter import split_data
+from imblearn.over_sampling import SMOTENC
 
 from src.utils.config import (
     NUMERIC_FEATURES,
     CATEGORICAL_FEATURES,
     BINARY_FEATURES,
-    TARGET_BINARY_COL
+    TARGET_BINARY_COL,
+    RANDOM_STATE
 )
 
 logger = logging.getLogger(__name__)
@@ -121,8 +123,22 @@ def get_processed_data(model_type: str = "xgb"):
     X_val_processed = pipeline.transform(X_val)
     X_test_processed = pipeline.transform(X_test)
     
-    logger.info(f"Pipeline created feature matrix with shape: {X_train_processed.shape}")
+    logger.info(f"Pipeline created initial feature matrix with shape: {X_train_processed.shape}")
     
+    # ONLY apply SMOTENC if XGBoost pipeline (LR uses sparse OHE which is hard to track without deep mapping)
+    if model_type == "xgb":
+        logger.info("Applying SMOTENC oversampling to synthesize minority class patients...")
+        # Numeric comes first, then categorical, then binary.
+        # Everything after numeric is treated as categorical by SMOTENC to avoid inventing floating point 
+        # ages and maintaining discrete mappings.
+        num_len = len(NUMERIC_FEATURES)
+        total_len = X_train_processed.shape[1]
+        cat_indices = list(range(num_len, total_len))
+        
+        smotenc = SMOTENC(random_state=RANDOM_STATE, categorical_features=cat_indices, sampling_strategy='auto')
+        X_train_processed, y_train = smotenc.fit_resample(X_train_processed, y_train)
+        logger.info(f"SMOTENC synthetically expanded training matrix to: {X_train_processed.shape}")
+        
     # The output is a numpy array. We can wrap it back into a DataFrame if we want,
     # but numpy arrays are standard for sklearn/xgboost. We'll return the arrays.
     # To get column names extracted from OneHotEncoder:
