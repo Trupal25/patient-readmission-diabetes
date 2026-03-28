@@ -54,9 +54,9 @@ def split_data(
     )
     
     logger.info(f"Split completed.")
-    logger.info(f"Train size: {len(X_train)} ({len(X_train)/len(df):.1%}) - Posatives: {y_train.mean():.1%}")
-    logger.info(f"Val size:   {len(X_val)} ({len(X_val)/len(df):.1%}) - Posatives: {y_val.mean():.1%}")
-    logger.info(f"Test size:  {len(X_test)} ({len(X_test)/len(df):.1%}) - Posatives: {y_test.mean():.1%}")
+    logger.info(f"Train size: {len(X_train)} ({len(X_train)/len(df):.1%}) - Positives: {y_train.mean():.1%}")
+    logger.info(f"Val size:   {len(X_val)} ({len(X_val)/len(df):.1%}) - Positives: {y_val.mean():.1%}")
+    logger.info(f"Test size:  {len(X_test)} ({len(X_test)/len(df):.1%}) - Positives: {y_test.mean():.1%}")
     
     if save_indices:
         indices = {
