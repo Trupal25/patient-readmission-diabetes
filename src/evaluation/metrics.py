@@ -24,9 +24,16 @@ def evaluate_predictions(y_true: np.ndarray, y_prob: np.ndarray, model_name: str
     auprc = average_precision_score(y_true, y_prob)
     brier = brier_score_loss(y_true, y_prob)
     
-    # 2. Find optimal threshold using Youden's J statistic (TPR - FPR)
+    # 2. Find optimal threshold using Asymmetrical Cost Matrix (Normalized)
+    # Clinical logic: A False Negative is 5x more dangerous/expensive
+    # than a False Positive. We use rates (TPR/FPR) to prevent the massive 
+    # majority negative class from dominating the absolute counts.
     fpr, tpr, thresholds = roc_curve(y_true, y_prob)
-    optimal_idx = np.argmax(tpr - fpr)
+    
+    # Cost = 5 * False Negative Rate + 1 * False Positive Rate
+    costs = 5 * (1 - tpr) + 1 * fpr
+    
+    optimal_idx = np.argmin(costs)
     optimal_threshold = thresholds[optimal_idx]
     
     # Convert to binary predictions using the optimal threshold
