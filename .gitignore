@@ -1,0 +1,9 @@
+models/*.joblib
+reports/
+__pycache__
+.env
+*.pyc
+dataset_diabetes/*.csv
+.venv/
+venv/
+env/
