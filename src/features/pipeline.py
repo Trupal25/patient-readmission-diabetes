@@ -1,6 +1,7 @@
 import pandas as pd
 import logging
 import argparse
+from typing import Any, cast
 
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
@@ -23,6 +24,32 @@ from src.utils.config import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def load_engineered_dataframe() -> pd.DataFrame:
+    """
+    Load the raw dataset and apply the full feature engineering stack.
+    """
+    df = load_raw_data(decode_ids=False)
+    df = clean(df)
+    df = add_icd_groups(df)
+    df = engineer_features(df)
+    df = calculate_elixhauser_score(df)
+    return df
+
+
+def load_modeling_dataframe() -> pd.DataFrame:
+    """
+    Return the exact feature frame expected by the training and inference code.
+    """
+    df = load_engineered_dataframe()
+    required_cols = (
+        NUMERIC_FEATURES + CATEGORICAL_FEATURES + BINARY_FEATURES + [TARGET_BINARY_COL]
+    )
+    missing_cols = [c for c in required_cols if c not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Feature engineering missed required columns: {missing_cols}")
+    return df[required_cols].copy()
 
 def build_pipeline(model_type: str = "xgb") -> Pipeline:
     """
@@ -86,29 +113,8 @@ def get_processed_data(model_type: str = "xgb"):
     Returns:
         X_train_processed, X_val_processed, X_test_processed, y_train, y_val, y_test
     """
-    # 1. Load data
-    df = load_raw_data(decode_ids=False)
-    
-    # 2. Clean data
-    df = clean(df)
-    
-    # 3. Add ICD groups
-    df = add_icd_groups(df)
-    
-    # 4. Engineer features
-    df = engineer_features(df)
-    
-    # 4.5 Add Elixhauser Score
-    df = calculate_elixhauser_score(df)
-    
-    # Check that all required columns exist before splitting
-    required_cols = NUMERIC_FEATURES + CATEGORICAL_FEATURES + BINARY_FEATURES + [TARGET_BINARY_COL]
-    missing_cols = [c for c in required_cols if c not in df.columns]
-    if missing_cols:
-        raise ValueError(f"Feature engineering missed required columns: {missing_cols}")
-        
-    # Keep only the features we need + the target
-    df = df[required_cols]
+    # 1. Build the full modeling frame
+    df = load_modeling_dataframe()
     
     # 5. Split train/val/test
     X_train, X_val, X_test, y_train, y_val, y_test = split_data(df, target_col=TARGET_BINARY_COL)
@@ -135,8 +141,24 @@ def get_processed_data(model_type: str = "xgb"):
         total_len = X_train_processed.shape[1]
         cat_indices = list(range(num_len, total_len))
         
-        smotenc = SMOTENC(random_state=RANDOM_STATE, categorical_features=cat_indices, sampling_strategy='auto')
-        X_train_processed, y_train = smotenc.fit_resample(X_train_processed, y_train)
+        smotenc = SMOTENC(
+            random_state=RANDOM_STATE,
+            categorical_features=cat_indices,
+            sampling_strategy='auto'
+        )
+        resampled = cast(
+            tuple[Any, Any],
+            smotenc.fit_resample(X_train_processed, y_train)
+        )
+        X_train_processed, y_train_resampled = resampled
+        if isinstance(y_train, pd.Series):
+            y_train = pd.Series(
+                cast(Any, y_train_resampled),
+                name=y_train.name,
+                dtype=y_train.dtype
+            )
+        else:
+            y_train = y_train_resampled
         logger.info(f"SMOTENC synthetically expanded training matrix to: {X_train_processed.shape}")
         
     # The output is a numpy array. We can wrap it back into a DataFrame if we want,

@@ -29,6 +29,21 @@ class SupportsPredictProba(Protocol):
     def predict_proba(self, X: object) -> FloatArray: ...
 
 
+def compute_optimal_threshold(
+    y_true: IntArray,
+    y_prob: FloatArray,
+    false_negative_cost: float = 5.0,
+    false_positive_cost: float = 1.0,
+) -> float:
+    """
+    Select a probability threshold using a simple asymmetric clinical cost rule.
+    """
+    fpr, tpr, thresholds = roc_curve(y_true, y_prob)
+    costs = false_negative_cost * (1 - tpr) + false_positive_cost * fpr
+    optimal_idx = int(np.argmin(costs))
+    return float(thresholds[optimal_idx])
+
+
 def evaluate_predictions(
     y_true: IntArray, y_prob: FloatArray, model_name: str
 ) -> tuple[EvaluationMetrics, IntArray]:
@@ -38,17 +53,8 @@ def evaluate_predictions(
     auprc = average_precision_score(y_true, y_prob)
     brier = brier_score_loss(y_true, y_prob)
     
-    # 2. Find optimal threshold using Asymmetrical Cost Matrix (Normalized)
-    # Clinical logic: A False Negative is 5x more dangerous/expensive
-    # than a False Positive. We use rates (TPR/FPR) to prevent the massive 
-    # majority negative class from dominating the absolute counts.
-    fpr, tpr, thresholds = roc_curve(y_true, y_prob)
-    
-    # Cost = 5 * False Negative Rate + 1 * False Positive Rate
-    costs = 5 * (1 - tpr) + 1 * fpr
-    
-    optimal_idx = np.argmin(costs)
-    optimal_threshold = thresholds[optimal_idx]
+    # 2. Find the operating threshold using the same asymmetric clinical cost rule
+    optimal_threshold = compute_optimal_threshold(y_true, y_prob)
     
     # Convert to binary predictions using the optimal threshold
     y_pred: IntArray = (y_prob >= optimal_threshold).astype(np.int_)

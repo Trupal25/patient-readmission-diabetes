@@ -1,72 +1,142 @@
-# 🏥 Patient Readmission Prediction Pipeline
+# Patient Readmission Prediction Pipeline
 
-> Predicting 30-day hospital readmission for diabetic patients using an end-to-end ML pipeline with SHAP explainability and fairness auditing.
+Predicting 30-day hospital readmission risk for diabetic patients using an end-to-end machine learning workflow with explainability, subgroup auditing, and a live demo dashboard.
 
-## Clinical Motivation
-Hospital readmissions within 30 days are a major driver of healthcare costs and point to potential failures in care transitions. This pipeline aims to proactively identify diabetic patients at high risk of rapid readmission at the time of their discharge, enabling targeted interventions, better resource allocation, and ultimately improved patient outcomes.
+## Capstone Framing
+
+This project is positioned as a healthcare decision-support system that addresses several common hospital challenges:
+
+- rising chronic disease burden
+- uncertainty in predicting patient outcomes
+- delays in identifying high-risk patients before discharge
+- pressure on hospital resources and care-transition planning
+
+The core question is:
+
+**Can structured hospital encounter data be used to identify diabetic patients at high risk of 30-day readmission and support earlier intervention?**
+
+## Objectives Covered
+
+This project directly supports the capstone objectives:
+
+- perform EDA on a real clinical dataset
+- identify important health indicators and readmission risk factors
+- build machine learning models for patient risk classification
+- develop a predictive system that supports healthcare decision-making
+
+Deep learning is intentionally left as future scope because the current dataset is tabular EHR-style data rather than medical imaging or physiological signal data.
 
 ## Dataset
 
-**Kaggle Diabetic Readmission Dataset** — 101,766 encounters × 50 features, from 130 US hospitals (1999–2008).
+This repo uses the public diabetic readmission dataset commonly shared on Kaggle:
 
-- Download from Kaggle: `diabetes+130-us+hospitals+for+years+1999-2008`
-- Place `diabetic_data.csv` and `IDs_mapping.csv` inside `dataset_diabetes/`
+- `diabetes+130-us+hospitals+for+years+1999-2008`
+- 101,766 encounters
+- 50 source variables
+- target: readmission within 30 days (`<30`) vs not readmitted within 30 days
 
-| Metric | Value |
-|---|---|
-| Rows | 101,766 |
-| Columns | 50 |
-| Target | `<30` (11.2%), `>30` (34.9%), `NO` (53.9%) — binarized to `<30` vs rest |
+Place these files inside `dataset_diabetes/`:
 
-## Setup & Reproducibility
+- `diabetic_data.csv`
+- `IDs_mapping.csv`
 
-1. **Clone & enter project**:
-   ```bash
-   git clone https://github.com/Trupal25/patient-readmission-diabetes.git
-   cd patient-readmission-diabetes
-   ```
-2. **Create virtual environment and install dependencies**:
-   ```bash
-   make setup
-   source .venv/bin/activate
-   ```
-3. **Execute the full pipeline end-to-end**:
-   ```bash
-   make all      # Runs preprocess, model training, and evaluation
-   ```
-4. **Run the testing suite**:
-   ```bash
-   make test
-   ```
-5. **Launch the Dashboard**:
-   ```bash
-   make dashboard
-   ```
+## Project Components
 
-## Key Results
+- `notebooks/01_eda.ipynb`: exploratory data analysis and early data understanding
+- `src/data/`: loading, cleaning, and train/validation/test splitting
+- `src/features/`: ICD grouping, utilization features, medication aggregation, and preprocessing pipeline
+- `src/models/`: logistic regression baseline, XGBoost model, and hyperparameter tuning
+- `src/evaluation/`: metrics, SHAP analysis, and fairness audit
+- `dashboard/app.py`: Streamlit dashboard with held-out patient exploration and manual intake scoring
 
-After rigorous cross-validation and hyperparameter optimization via `Optuna`, the models were evaluated against a strictly held-out 15% testing set.
+## Current Workflow
 
-| Model | AUROC (Test) | AUPRC (Test) | Notes |
-|---|---|---|---|
-| Logistic Regression | 0.638 | 0.153 | Baseline model — Highly interpretable feature weights. |
-| **XGBoost (Tuned)** | **0.641** | **0.155** | Primary model — Better precision-recall tradeoff handling class imbalance with `scale_pos_weight`. |
+1. Load and validate the public dataset
+2. Clean the encounters and remove leakage-prone cases
+3. Engineer readmission-relevant features
+4. Train baseline and boosted-tree models
+5. Evaluate on a held-out test set
+6. Interpret the model with SHAP
+7. Review subgroup behavior across demographic slices
+8. Demonstrate inference in a dashboard
 
-*(Note: Random baseline AUPRC for this dataset is ~0.09. Our models substantially outperform random chance in precision-recall space).*
+## Setup
 
-### Top Predictors
-SHAP explainability and Logistic Regression coefficients highlight the following dominant features driving readmission risk:
-1. **Discharge Disposition**: Patients diverted to a Skilled Nursing Facility (SNF) or Transfer locations show dramatically elevated readmission risks.
-2. **Prior Utilization**: Historical counts of inpatient and emergency visits are heavy structural indicators of fragility.
-3. **Admission Source**: Specifically transfers from other hospitals/facilities.
-4. **Primary Diagnoses**: Certain specific clusters (like Neoplasms and complex circulatory issues) correlated strongly with return visits.
+```bash
+make setup
+source .venv/bin/activate
+```
 
-### Subgroup Fairness Audit
-We evaluated both Equalized Odds (True Positive Rate gap) and Predictive Parity (Positive Predictive Value gap) across Race, Gender, and Age demographics.
-- **Result**: **PASS**. All primary subgroup distributions (where n > 100) exhibited TPR and PPV disparity gaps of `< 5%`. 
-- **Caveat**: The extremely elderly bracket `[90-100)` suffered a drop in baseline AUROC accuracy (< 0.60) largely due to statistical sparsity and complex end-of-life morbidity baselines.
+## Run The Project
 
-## Limitations & Future Work
-- **Temporal constraints**: Because the dataset lacks explicit timestamp columns, a stratified random split was used instead of a true temporal (rolling window) split.
-- **Deep Sequence Modeling**: Utilizing LSTM tracking for sequential lab/vitals trajectories was deemed a stretch goal requiring richer EHR context (like MIMIC-IV).
-- **Clinical Notes NLP**: Extracting sentiment or deterioration markers from free-text physician discharge notes via ClinicalBERT could vastly improve AUROC in future iterations.
+Full pipeline:
+
+```bash
+make all
+```
+
+Run tests:
+
+```bash
+make test
+```
+
+Launch dashboard:
+
+```bash
+make dashboard
+```
+
+## Dashboard Demo
+
+The Streamlit app supports two demo flows:
+
+- inspect an anonymized patient from the held-out test cohort
+- score a manually entered patient profile using a short intake form
+
+The manual form is intentionally compact for capstone demos. Any fields not shown in the UI are backfilled from cohort medians or modes so you can demonstrate live scoring without re-creating the full source dataset schema.
+
+## Modeling Summary
+
+Current modeling work includes:
+
+- Logistic Regression as an interpretable baseline
+- XGBoost as the primary non-linear model
+- SHAP-based feature attribution for global and local explanations
+
+Representative risk drivers in this project include:
+
+- discharge disposition and transfer patterns
+- prior inpatient and emergency utilization
+- diagnosis groupings
+- medication burden and comorbidity load
+
+## Evaluation Notes
+
+The repository includes:
+
+- AUROC, AUPRC, calibration, confusion matrix, and thresholded classification metrics
+- SHAP summary plots and single-patient explanations
+- subgroup audit outputs for race, gender, and age
+
+Fairness outputs should be presented as an audit, not as a blanket claim of fairness across all groups. Small subgroup sizes and threshold choice can materially affect those results.
+
+## Submission-Ready Talking Points
+
+- clear healthcare motivation tied to readmission risk and resource planning
+- end-to-end ML workflow from raw data to dashboard
+- interpretable outputs suitable for a capstone demo
+- realistic scope for a short internship submission
+
+## Limitations And Future Work
+
+- the dataset does not support a true temporal split with explicit event timestamps
+- the current system is based on structured tabular data only
+- external validation on a second hospital dataset is not included
+
+Future extensions:
+
+- richer hospital intake forms with database-backed persistence
+- sequence modeling on longitudinal EHR datasets
+- clinical notes NLP on discharge summaries
+- deeper fairness and calibration review by subgroup
