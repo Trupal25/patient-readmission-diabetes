@@ -2,15 +2,11 @@ import logging
 import joblib
 import pandas as pd
 import numpy as np
-from pathlib import Path
 
 from sklearn.metrics import roc_auc_score, confusion_matrix
 
-from src.data.loader import load_raw_data
-from src.data.cleaner import clean
-from src.features.icd_grouper import add_icd_groups
-from src.features.engineer import engineer_features
-from src.features.pipeline import get_processed_data
+from src.evaluation.metrics import compute_optimal_threshold
+from src.features.pipeline import get_processed_data, load_engineered_dataframe
 from src.utils.config import MODELS_DIR, METRICS_DIR
 
 logger = logging.getLogger(__name__)
@@ -56,16 +52,15 @@ def run_fairness_audit():
     # 2. Get predictions
     y_prob = model.predict_proba(X_test_arr)[:, 1]
     
-    # In fairness analysis, we use a fixed threshold (e.g., global threshold or standard 0.5)
-    # Let's use 0.1 for this highly imbalanced dataset as a representative operating point
-    threshold = 0.1
+    # Reuse the same asymmetric operating point selected during the main evaluation.
+    threshold = compute_optimal_threshold(
+        y_test_series.to_numpy(dtype=np.int_),
+        y_prob.astype(np.float64),
+    )
     
     # 3. Retrieve original demographic features using the test split indices
     logger.info("Loading original dataset to recover demographics...")
-    df = load_raw_data(decode_ids=False)
-    df = clean(df)
-    df = add_icd_groups(df)
-    df = engineer_features(df)
+    df = load_engineered_dataframe()
     
     # Subset to test data
     test_idx = y_test_series.index
@@ -113,7 +108,7 @@ def run_fairness_audit():
     report_df = pd.DataFrame(results)
     
     # Check for equalized odds and predictive parity
-    logger.info(f"\nDisparity Report (Threshold = {threshold}):")
+    logger.info(f"\nDisparity Report (Threshold = {threshold:.4f}):")
     
     # Print groupings
     for attr in report_df['Attribute'].unique():

@@ -1,6 +1,7 @@
 import pandas as pd
 import logging
 import argparse
+from typing import Any, cast
 
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
@@ -10,16 +11,45 @@ from src.data.loader import load_raw_data
 from src.data.cleaner import clean
 from src.features.icd_grouper import add_icd_groups
 from src.features.engineer import engineer_features
+from src.features.elixhauser import calculate_elixhauser_score
 from src.data.splitter import split_data
+from imblearn.over_sampling import SMOTENC
 
 from src.utils.config import (
     NUMERIC_FEATURES,
     CATEGORICAL_FEATURES,
     BINARY_FEATURES,
-    TARGET_BINARY_COL
+    TARGET_BINARY_COL,
+    RANDOM_STATE
 )
 
 logger = logging.getLogger(__name__)
+
+
+def load_engineered_dataframe() -> pd.DataFrame:
+    """
+    Load the raw dataset and apply the full feature engineering stack.
+    """
+    df = load_raw_data(decode_ids=False)
+    df = clean(df)
+    df = add_icd_groups(df)
+    df = engineer_features(df)
+    df = calculate_elixhauser_score(df)
+    return df
+
+
+def load_modeling_dataframe() -> pd.DataFrame:
+    """
+    Return the exact feature frame expected by the training and inference code.
+    """
+    df = load_engineered_dataframe()
+    required_cols = (
+        NUMERIC_FEATURES + CATEGORICAL_FEATURES + BINARY_FEATURES + [TARGET_BINARY_COL]
+    )
+    missing_cols = [c for c in required_cols if c not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Feature engineering missed required columns: {missing_cols}")
+    return df[required_cols].copy()
 
 def build_pipeline(model_type: str = "xgb") -> Pipeline:
     """
@@ -83,26 +113,8 @@ def get_processed_data(model_type: str = "xgb"):
     Returns:
         X_train_processed, X_val_processed, X_test_processed, y_train, y_val, y_test
     """
-    # 1. Load data
-    df = load_raw_data(decode_ids=False)
-    
-    # 2. Clean data
-    df = clean(df)
-    
-    # 3. Add ICD groups
-    df = add_icd_groups(df)
-    
-    # 4. Engineer features
-    df = engineer_features(df)
-    
-    # Check that all required columns exist before splitting
-    required_cols = NUMERIC_FEATURES + CATEGORICAL_FEATURES + BINARY_FEATURES + [TARGET_BINARY_COL]
-    missing_cols = [c for c in required_cols if c not in df.columns]
-    if missing_cols:
-        raise ValueError(f"Feature engineering missed required columns: {missing_cols}")
-        
-    # Keep only the features we need + the target
-    df = df[required_cols]
+    # 1. Build the full modeling frame
+    df = load_modeling_dataframe()
     
     # 5. Split train/val/test
     X_train, X_val, X_test, y_train, y_val, y_test = split_data(df, target_col=TARGET_BINARY_COL)
@@ -117,8 +129,38 @@ def get_processed_data(model_type: str = "xgb"):
     X_val_processed = pipeline.transform(X_val)
     X_test_processed = pipeline.transform(X_test)
     
-    logger.info(f"Pipeline created feature matrix with shape: {X_train_processed.shape}")
+    logger.info(f"Pipeline created initial feature matrix with shape: {X_train_processed.shape}")
     
+    # ONLY apply SMOTENC if XGBoost pipeline (LR uses sparse OHE which is hard to track without deep mapping)
+    if model_type == "xgb":
+        logger.info("Applying SMOTENC oversampling to synthesize minority class patients...")
+        # Numeric comes first, then categorical, then binary.
+        # Everything after numeric is treated as categorical by SMOTENC to avoid inventing floating point 
+        # ages and maintaining discrete mappings.
+        num_len = len(NUMERIC_FEATURES)
+        total_len = X_train_processed.shape[1]
+        cat_indices = list(range(num_len, total_len))
+        
+        smotenc = SMOTENC(
+            random_state=RANDOM_STATE,
+            categorical_features=cat_indices,
+            sampling_strategy='auto'
+        )
+        resampled = cast(
+            tuple[Any, Any],
+            smotenc.fit_resample(X_train_processed, y_train)
+        )
+        X_train_processed, y_train_resampled = resampled
+        if isinstance(y_train, pd.Series):
+            y_train = pd.Series(
+                cast(Any, y_train_resampled),
+                name=y_train.name,
+                dtype=y_train.dtype
+            )
+        else:
+            y_train = y_train_resampled
+        logger.info(f"SMOTENC synthetically expanded training matrix to: {X_train_processed.shape}")
+        
     # The output is a numpy array. We can wrap it back into a DataFrame if we want,
     # but numpy arrays are standard for sklearn/xgboost. We'll return the arrays.
     # To get column names extracted from OneHotEncoder:
