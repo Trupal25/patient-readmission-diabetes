@@ -38,10 +38,26 @@ def compute_optimal_threshold(
     """
     Select a probability threshold using a simple asymmetric clinical cost rule.
     """
-    fpr, tpr, thresholds = roc_curve(y_true, y_prob)
-    costs = false_negative_cost * (1 - tpr) + false_positive_cost * fpr
-    optimal_idx = int(np.argmin(costs))
-    return float(thresholds[optimal_idx])
+    candidate_thresholds = np.unique(np.asarray(y_prob, dtype=np.float64))
+    best_threshold = float(candidate_thresholds[0])
+    best_cost = float("inf")
+
+    for threshold in candidate_thresholds:
+        y_pred = (y_prob >= threshold).astype(np.int_)
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
+
+        false_negative_rate = fn / (fn + tp) if (fn + tp) > 0 else 0.0
+        false_positive_rate = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+        cost = (
+            false_negative_cost * false_negative_rate
+            + false_positive_cost * false_positive_rate
+        )
+
+        if cost < best_cost:
+            best_cost = cost
+            best_threshold = float(threshold)
+
+    return best_threshold
 
 
 def evaluate_predictions(

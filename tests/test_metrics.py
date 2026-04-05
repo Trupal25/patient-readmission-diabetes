@@ -9,5 +9,6 @@ def test_compute_optimal_threshold_returns_probability_cutoff():
 
     threshold = compute_optimal_threshold(y_true, y_prob)
 
+    assert np.isfinite(threshold)
     assert 0.0 <= threshold <= 1.0
-    assert threshold in y_prob
+    assert threshold == 0.35

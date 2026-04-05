@@ -2,17 +2,19 @@ import logging
 import json
 import joblib
 import optuna
-import mlflow
 import numpy as np
 from xgboost import XGBClassifier
-from typing import Dict, Any
+from typing import Dict, Any, TypeAlias
 
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import average_precision_score, roc_auc_score
 from src.features.pipeline import get_processed_data
 from src.utils.config import MODELS_DIR, METRICS_DIR
+from src.utils import mlflow_utils
 
 logger = logging.getLogger(__name__)
+
+HyperParams: TypeAlias = dict[str, int | float | str]
 
 # Reduce verbosity of Optuna globally if desired (INFO is good for 100 trials though)
 optuna.logging.set_verbosity(optuna.logging.INFO)
@@ -23,8 +25,8 @@ def optimize_hyperparameters(n_trials: int = 50) -> Dict[str, Any]:
     
     X_train, X_val, _, y_train, y_val, _, _, _ = get_processed_data(model_type="xgb")
     
-    def objective(trial):
-        params = {
+    def objective(trial: optuna.Trial) -> float:
+        params: HyperParams = {
             'objective': 'binary:logistic',
             'eval_metric': 'aucpr',
             'max_depth': trial.suggest_int('max_depth', 3, 10),
@@ -49,7 +51,7 @@ def optimize_hyperparameters(n_trials: int = 50) -> Dict[str, Any]:
         )
         
         y_val_proba = model.predict_proba(X_val)[:, 1]
-        auprc = average_precision_score(y_val, y_val_proba)
+        auprc = float(average_precision_score(y_val, y_val_proba))
         
         return auprc
 
@@ -69,7 +71,7 @@ def optimize_hyperparameters(n_trials: int = 50) -> Dict[str, Any]:
         
     return best_params
 
-def cross_validate_best_model(best_params: Dict[str, Any]):
+def cross_validate_best_model(best_params: Dict[str, Any]) -> None:
     """Run 5-Fold Stratified CV using the best hyperparams to check for high variance."""
     logger.info("Running 5-Fold Stratified CV with optimized parameters...")
     
@@ -78,18 +80,18 @@ def cross_validate_best_model(best_params: Dict[str, Any]):
     # Needs a combined dataset. Actually the implementation plan asked to run CV on the 
     # initial training set.
     X_arr = X_train
-    y_arr = y_train.values  # Convert from pd.Series to numpy 1D
+    y_arr = np.asarray(y_train.to_numpy(), dtype=np.int_)  # Convert to a concrete 1D numpy array
     
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     
-    auroc_scores = []
-    auprc_scores = []
+    auroc_scores: list[float] = []
+    auprc_scores: list[float] = []
     
     for fold, (train_idx, val_idx) in enumerate(skf.split(X_arr, y_arr)):
         X_t, y_t = X_arr[train_idx], y_arr[train_idx]
         X_v, y_v = X_arr[val_idx], y_arr[val_idx]
         
-        model_params = best_params.copy()
+        model_params: dict[str, Any] = best_params.copy()
         model_params.update({
             'objective': 'binary:logistic',
             'eval_metric': 'aucpr',
@@ -106,16 +108,18 @@ def cross_validate_best_model(best_params: Dict[str, Any]):
         
         y_v_proba = model.predict_proba(X_v)[:, 1]
         
-        auroc = roc_auc_score(y_v, y_v_proba)
-        auprc = average_precision_score(y_v, y_v_proba)
+        auroc = float(roc_auc_score(y_v, y_v_proba))
+        auprc = float(average_precision_score(y_v, y_v_proba))
         
         auroc_scores.append(auroc)
         auprc_scores.append(auprc)
         
         logger.info(f"  Fold {fold+1} | AUROC: {auroc:.4f} | AUPRC: {auprc:.4f}")
 
-    mean_auroc, std_auroc = np.mean(auroc_scores), np.std(auroc_scores)
-    mean_auprc, std_auprc = np.mean(auprc_scores), np.std(auprc_scores)
+    mean_auroc = float(np.mean(auroc_scores))
+    std_auroc = float(np.std(auroc_scores))
+    mean_auprc = float(np.mean(auprc_scores))
+    std_auprc = float(np.std(auprc_scores))
     
     logger.info("CV Results across 5 Folds:")
     logger.info(f"AUROC: {mean_auroc:.4f} ± {std_auroc:.4f}")
@@ -124,13 +128,13 @@ def cross_validate_best_model(best_params: Dict[str, Any]):
     if std_auprc > 0.05:
         logger.warning(f"High variance detected in AUPRC ({std_auprc:.4f})! The model might be overfitting to specific CV splits.")
 
-def retrain_and_save_optimized_model(best_params: Dict[str, Any]):
+def retrain_and_save_optimized_model(best_params: Dict[str, Any]) -> None:
     """Retrain on the FULL training set using the best params and save the joblib."""
     logger.info("Retraining optimized model on full training set...")
     
     X_train, X_val, _, y_train, y_val, _, _, _ = get_processed_data(model_type="xgb")
     
-    model_params = best_params.copy()
+    model_params: dict[str, Any] = best_params.copy()
     model_params.update({
         'objective': 'binary:logistic',
         'eval_metric': 'aucpr',
@@ -139,8 +143,7 @@ def retrain_and_save_optimized_model(best_params: Dict[str, Any]):
     })
     
     model = XGBClassifier(**model_params)
-    mlflow.set_experiment("Patient_Readmission_Models")
-    with mlflow.start_run(run_name="XGBoost_Optimized"):
+    with mlflow_utils.start_run(run_name="XGBoost_Optimized"):
         model.fit(
             X_train, y_train,
             eval_set=[(X_val, y_val)],
@@ -148,21 +151,21 @@ def retrain_and_save_optimized_model(best_params: Dict[str, Any]):
         )
         
         y_val_proba = model.predict_proba(X_val)[:, 1]
-        val_auroc = roc_auc_score(y_val, y_val_proba)
-        val_auprc = average_precision_score(y_val, y_val_proba)
+        val_auroc = float(roc_auc_score(y_val, y_val_proba))
+        val_auprc = float(average_precision_score(y_val, y_val_proba))
         
         logger.info(f"Final Retrained Validation AUROC: {val_auroc:.4f}")
         logger.info(f"Final Retrained Validation AUPRC: {val_auprc:.4f}")
         
         # Log to MLflow
-        mlflow.log_params(model_params)
-        mlflow.log_metrics({
+        mlflow_utils.log_params(model_params)
+        mlflow_utils.log_metrics({
             "val_auroc": val_auroc,
             "val_auprc": val_auprc,
-            "best_iteration": getattr(model, "best_iteration", 0)
+            "best_iteration": int(getattr(model, "best_iteration", 0))
         })
         
-        mlflow.xgboost.log_model(model, "xgboost_model")
+        mlflow_utils.log_xgboost_model(model, "xgboost_model")
         
         out_path = MODELS_DIR / "xgboost_optimized.joblib"
         joblib.dump(model, out_path)

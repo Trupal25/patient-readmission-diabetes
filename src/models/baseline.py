@@ -1,7 +1,6 @@
 import logging
 import joblib
 import pandas as pd
-import mlflow
 from typing import Tuple, Dict
 
 from sklearn.linear_model import LogisticRegression
@@ -9,20 +8,20 @@ from sklearn.metrics import roc_auc_score, average_precision_score
 
 from src.features.pipeline import get_processed_data
 from src.utils.config import MODELS_DIR
+from src.utils import mlflow_utils
 
 logger = logging.getLogger(__name__)
 
 def evaluate_model(y_true, y_pred_proba) -> Dict[str, float]:
     """Helper to calculate AUROC and AUPRC."""
-    auroc = roc_auc_score(y_true, y_pred_proba)
-    auprc = average_precision_score(y_true, y_pred_proba)
+    auroc = float(roc_auc_score(y_true, y_pred_proba))
+    auprc = float(average_precision_score(y_true, y_pred_proba))
     return {"auroc": auroc, "auprc": auprc}
 
 def train_baseline() -> Tuple[LogisticRegression, Dict[str, float]]:
     logger.info("Initializing baseline Logistic Regression training...")
     
-    mlflow.set_experiment("Patient_Readmission_Models")
-    with mlflow.start_run(run_name="Logistic_Baseline"):
+    with mlflow_utils.start_run(run_name="Logistic_Baseline"):
         # 1. Load data processed specifically for Logistic Regression (OneHot, StandardScaler)
         X_train, X_val, _, y_train, y_val, _, feature_names, _ = get_processed_data(model_type="lr")
         
@@ -35,9 +34,9 @@ def train_baseline() -> Tuple[LogisticRegression, Dict[str, float]]:
         model.fit(X_train, y_train)
         
         # Log params
-        mlflow.log_param("model_type", "Logistic Regression")
-        mlflow.log_param("class_weight", "balanced")
-        mlflow.log_param("max_iter", 1000)
+        mlflow_utils.log_param("model_type", "Logistic Regression")
+        mlflow_utils.log_param("class_weight", "balanced")
+        mlflow_utils.log_param("max_iter", 1000)
         
         # 4. Evaluate on Validation Set
         y_val_proba = model.predict_proba(X_val)[:, 1]
@@ -47,7 +46,7 @@ def train_baseline() -> Tuple[LogisticRegression, Dict[str, float]]:
         logger.info(f"AUROC: {metrics['auroc']:.4f}")
         logger.info(f"AUPRC: {metrics['auprc']:.4f}")
         
-        mlflow.log_metrics({
+        mlflow_utils.log_metrics({
             "val_auroc": metrics['auroc'],
             "val_auprc": metrics['auprc']
         })
@@ -64,7 +63,7 @@ def train_baseline() -> Tuple[LogisticRegression, Dict[str, float]]:
             
             # Save coefficients for analysis
             coefs.to_csv(MODELS_DIR / "lr_coefficients.csv", index=False)
-            mlflow.log_artifact(str(MODELS_DIR / "lr_coefficients.csv"))
+            mlflow_utils.log_artifact(str(MODELS_DIR / "lr_coefficients.csv"))
         
         # 6. Save Model
         model_path = MODELS_DIR / "logistic_baseline.joblib"
@@ -72,7 +71,7 @@ def train_baseline() -> Tuple[LogisticRegression, Dict[str, float]]:
         logger.info(f"Saved baseline model to {model_path}")
         
         # Log model to MLflow natively
-        mlflow.sklearn.log_model(model, "logistic_model")
+        mlflow_utils.log_sklearn_model(model, "logistic_model")
         
     return model, metrics
 

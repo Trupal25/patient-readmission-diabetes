@@ -1,26 +1,25 @@
 import logging
 import joblib
-import mlflow
 from xgboost import XGBClassifier
 from typing import Tuple, Dict
 
 from sklearn.metrics import roc_auc_score, average_precision_score
 from src.features.pipeline import get_processed_data
 from src.utils.config import MODELS_DIR
+from src.utils import mlflow_utils
 
 logger = logging.getLogger(__name__)
 
 def evaluate_model(y_true, y_pred_proba) -> Dict[str, float]:
     """Helper to calculate AUROC and AUPRC."""
-    auroc = roc_auc_score(y_true, y_pred_proba)
-    auprc = average_precision_score(y_true, y_pred_proba)
+    auroc = float(roc_auc_score(y_true, y_pred_proba))
+    auprc = float(average_precision_score(y_true, y_pred_proba))
     return {"auroc": auroc, "auprc": auprc}
 
 def train_initial_xgboost() -> Tuple[XGBClassifier, Dict[str, float]]:
     logger.info("Initializing baseline XGBoost training...")
     
-    mlflow.set_experiment("Patient_Readmission_Models")
-    with mlflow.start_run(run_name="XGBoost_Initial"):
+    with mlflow_utils.start_run(run_name="XGBoost_Initial"):
         # 1. Load data processed specifically for XGBoost (OrdinalEncoder, Passthrough numeric)
         X_train, X_val, _, y_train, y_val, _, feature_names, _ = get_processed_data(model_type="xgb")
         
@@ -61,8 +60,8 @@ def train_initial_xgboost() -> Tuple[XGBClassifier, Dict[str, float]]:
         logger.info(f"AUPRC: {metrics['auprc']:.4f}")
         logger.info(f"Best Iteration: {model.best_iteration}")
         
-        mlflow.log_params(model.get_params())
-        mlflow.log_metrics({
+        mlflow_utils.log_params(model.get_params())
+        mlflow_utils.log_metrics({
             "val_auroc": metrics['auroc'],
             "val_auprc": metrics['auprc'],
             "best_iteration": model.best_iteration
@@ -73,7 +72,7 @@ def train_initial_xgboost() -> Tuple[XGBClassifier, Dict[str, float]]:
         joblib.dump(model, model_path)
         logger.info(f"Saved initial XGBoost model to {model_path}")
         
-        mlflow.xgboost.log_model(model, "xgboost_model")
+        mlflow_utils.log_xgboost_model(model, "xgboost_model")
         
     return model, metrics
 
