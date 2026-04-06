@@ -35,8 +35,7 @@ evaluate:  ## Run full evaluation suite
 	$(PYTHON) -m src.evaluation.fairness
 	$(PYTHON) -m src.evaluation.dashboard_bundle
 
-dashboard-assets:  ## Build the deployable dashboard demo bundle
-	$(PYTHON) -m src.evaluation.dashboard_bundle
+dashboard-assets: evaluate  ## Build the deployable dashboard demo bundle
 
 dashboard:  ## Launch the Streamlit explainability dashboard
 	$(STREAMLIT) run dashboard/app.py

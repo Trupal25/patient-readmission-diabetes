@@ -20,4 +20,4 @@ def test_compute_optimal_threshold_accounts_for_absolute_false_positive_burden()
 
     threshold = compute_optimal_threshold(y_true, y_prob)
 
-    assert threshold == 1.0
+    assert threshold == np.nextafter(1.0, 2.0)

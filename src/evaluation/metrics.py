@@ -38,11 +38,12 @@ def compute_optimal_threshold(
     """
     Select a probability threshold by minimizing expected misclassification burden.
 
-    The operating point is chosen from the observed score cutoffs plus `1.0`, which
-    lets the rule select an "alert nobody" policy when false positives are too costly.
+    The operating point is chosen from the observed score cutoffs plus a value
+    strictly greater than `1.0`, which lets the rule select an "alert nobody"
+    policy even when some predicted probabilities equal `1.0`.
     """
     candidate_thresholds = np.unique(np.asarray(y_prob, dtype=np.float64))
-    candidate_thresholds = np.append(candidate_thresholds, 1.0)
+    candidate_thresholds = np.append(candidate_thresholds, np.nextafter(1.0, 2.0))
     best_threshold = float(candidate_thresholds[0])
     best_cost = float("inf")
 

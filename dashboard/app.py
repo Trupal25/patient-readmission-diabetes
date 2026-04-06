@@ -104,7 +104,7 @@ def render_missing_artifact_notice(path: Path, label: str):
 
 def render_artifact_image(path: Path, label: str):
     if path.exists():
-        st.image(str(path), width="stretch")
+        st.image(str(path), use_container_width=True)
         return
     render_missing_artifact_notice(path, label)
 
@@ -426,7 +426,7 @@ def render_manual_predictor():
         contributions[["Feature", "Encoded Value", "SHAP Impact"]].style.format(
             {"Encoded Value": "{:.3f}", "SHAP Impact": "{:.3f}"}
         ),
-        width="stretch",
+        use_container_width=True,
     )
     render_waterfall(shap_values, "Manual patient explanation")
 
@@ -484,7 +484,7 @@ if page == "Overview":
     else:
         st.dataframe(
             metrics.round(4).style.highlight_max(subset=["AUROC", "AUPRC", "F1"], color="lightgreen"),
-            width="stretch",
+            use_container_width=True,
         )
 
 elif page == "Model Performance":
@@ -558,7 +558,7 @@ elif page == "Fairness Audit":
                 subset.style.background_gradient(subset=["TPR", "PPV"], cmap="Blues").highlight_min(
                     subset=["AUROC"], color="lightcoral"
                 ),
-                width="stretch",
+                use_container_width=True,
             )
 
             small_samples = subset[subset["N"] < 100]
