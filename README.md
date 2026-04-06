@@ -87,6 +87,12 @@ Launch dashboard:
 make dashboard
 ```
 
+Build deployable dashboard assets:
+
+```bash
+make dashboard-assets
+```
+
 ## Dashboard Demo
 
 The Streamlit app supports two demo flows:
@@ -95,6 +101,8 @@ The Streamlit app supports two demo flows:
 - score a manually entered patient profile using a short intake form
 
 The manual form is intentionally compact for capstone demos. Any fields not shown in the UI are backfilled from cohort medians or modes so you can demonstrate live scoring without re-creating the full source dataset schema.
+
+For deployment, the dashboard reads committed files from `reports/` and `dashboard/assets/demo_bundle.joblib`. That keeps Streamlit Cloud from depending on the ignored raw CSVs at runtime.
 
 ## Modeling Summary
 

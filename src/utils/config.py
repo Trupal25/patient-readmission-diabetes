@@ -18,9 +18,11 @@ MODELS_DIR = PROJECT_ROOT / "models"
 REPORTS_DIR = PROJECT_ROOT / "reports"
 FIGURES_DIR = REPORTS_DIR / "figures"
 METRICS_DIR = REPORTS_DIR / "metrics"
+DASHBOARD_ASSETS_DIR = PROJECT_ROOT / "dashboard" / "assets"
+DASHBOARD_BUNDLE_PATH = DASHBOARD_ASSETS_DIR / "demo_bundle.joblib"
 
 # Ensure output dirs exist at import time (safe, idempotent)
-for _d in (MODELS_DIR, FIGURES_DIR, METRICS_DIR):
+for _d in (MODELS_DIR, FIGURES_DIR, METRICS_DIR, DASHBOARD_ASSETS_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------------------------

@@ -12,10 +12,15 @@ import streamlit as st
 ROOT_DIR = Path(__file__).parent.parent
 sys.path.append(str(ROOT_DIR))
 
-from src.data.loader import load_ids_mapping
-from src.evaluation.metrics import compute_optimal_threshold
-from src.features.pipeline import get_processed_data, load_modeling_dataframe
-from src.utils.config import AGE_MIDPOINT_MAP, ALL_FEATURES, FIGURES_DIR, METRICS_DIR, MODELS_DIR
+from src.evaluation.dashboard_bundle import REQUIRED_DASHBOARD_BUNDLE_KEYS
+from src.utils.config import (
+    AGE_MIDPOINT_MAP,
+    ALL_FEATURES,
+    DASHBOARD_BUNDLE_PATH,
+    FIGURES_DIR,
+    METRICS_DIR,
+    MODELS_DIR,
+)
 
 AGE_LABELS = list(AGE_MIDPOINT_MAP.keys())
 MIDPOINT_TO_AGE_LABEL = {value: key for key, value in AGE_MIDPOINT_MAP.items()}
@@ -49,15 +54,6 @@ page = st.sidebar.radio(
         "Interactive Predictor",
     ],
 )
-
-
-def safe_mode(series: pd.Series):
-    mode = series.mode(dropna=True)
-    if not mode.empty:
-        return mode.iloc[0]
-    return series.iloc[0]
-
-
 def feature_name_list(feature_names, expected_width: int) -> list[str]:
     if len(feature_names) == expected_width:
         return list(feature_names)
@@ -72,36 +68,62 @@ def risk_band(probability: float, threshold: float) -> str:
     return "Lower risk"
 
 
-def clipped_default(frame: pd.DataFrame, column: str, minimum: int, maximum: int) -> int:
-    value = int(round(float(frame[column].median())))
+def clipped_default(defaults: dict[str, object], column: str, minimum: int, maximum: int) -> int:
+    value = int(round(float(defaults[column])))
     return min(max(value, minimum), maximum)
 
 
 @st.cache_data
 def load_metrics():
-    return pd.read_csv(METRICS_DIR / "model_comparison.csv")
+    metrics_path = METRICS_DIR / "model_comparison.csv"
+    if not metrics_path.exists():
+        return None
+    return pd.read_csv(metrics_path)
 
 
 @st.cache_data
 def load_fairness():
-    return pd.read_csv(METRICS_DIR / "fairness_audit.csv")
+    fairness_path = METRICS_DIR / "fairness_audit.csv"
+    if not fairness_path.exists():
+        return None
+    return pd.read_csv(fairness_path)
 
 
-@st.cache_data
-def load_reference_frame():
-    return load_modeling_dataframe().drop(columns=["readmitted_30day"]).copy()
+def relative_artifact_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT_DIR))
+    except ValueError:
+        return str(path)
 
 
-@st.cache_data
-def load_admission_source_labels():
-    mappings = load_ids_mapping()
-    mapping_df = mappings.get("admission_source_id")
-    if mapping_df is None:
-        return {}
-    return {
-        int(row["id"]): row["description"]
-        for _, row in mapping_df.iterrows()
-    }
+def render_missing_artifact_notice(path: Path, label: str):
+    st.info(
+        f"{label} is unavailable in this deployment because `{relative_artifact_path(path)}` is missing."
+    )
+
+
+def render_artifact_image(path: Path, label: str):
+    if path.exists():
+        st.image(str(path), width="stretch")
+        return
+    render_missing_artifact_notice(path, label)
+
+
+@st.cache_resource
+def load_dashboard_demo_bundle():
+    if not DASHBOARD_BUNDLE_PATH.exists():
+        raise FileNotFoundError(
+            "Interactive predictor assets are missing. Commit "
+            f"`{relative_artifact_path(DASHBOARD_BUNDLE_PATH)}` to the repo before deploying."
+        )
+
+    bundle = joblib.load(DASHBOARD_BUNDLE_PATH)
+    missing_keys = REQUIRED_DASHBOARD_BUNDLE_KEYS - bundle.keys()
+    if missing_keys:
+        raise ValueError(
+            f"Dashboard bundle is incomplete. Missing keys: {sorted(missing_keys)}."
+        )
+    return bundle
 
 
 @st.cache_resource
@@ -109,33 +131,25 @@ def load_model_bundle():
     xgb_path = MODELS_DIR / "xgboost_optimized.joblib"
     if not xgb_path.exists():
         xgb_path = MODELS_DIR / "xgboost_initial.joblib"
-
-    model = joblib.load(xgb_path)
-    _, _, X_test, _, _, y_test, feature_names, pipeline = get_processed_data("xgb")
-    explainer = shap.TreeExplainer(model)
-
-    metrics = load_metrics()
-    xgb_metrics = metrics[metrics["Model"] == "XGBoost (Tuned)"]
-    if not xgb_metrics.empty and "Opt_Threshold" in xgb_metrics.columns:
-        threshold = float(xgb_metrics["Opt_Threshold"].iloc[0])
-    else:
-        y_prob = model.predict_proba(X_test)[:, 1]
-        threshold = compute_optimal_threshold(
-            y_test.to_numpy(dtype=np.int_),
-            np.asarray(y_prob, dtype=np.float64),
+    if not xgb_path.exists():
+        raise FileNotFoundError(
+            "No XGBoost model artifact was found. Expected "
+            "`models/xgboost_optimized.joblib` or `models/xgboost_initial.joblib`."
         )
 
-    return model, explainer, pipeline, X_test, y_test, feature_names, threshold
+    model = joblib.load(xgb_path)
+    explainer = shap.TreeExplainer(model)
+    bundle = load_dashboard_demo_bundle()
 
-
-def build_default_profile(reference_frame: pd.DataFrame) -> dict[str, object]:
-    profile: dict[str, object] = {}
-    for column in reference_frame.columns:
-        if pd.api.types.is_numeric_dtype(reference_frame[column]):
-            profile[column] = float(reference_frame[column].median())
-        else:
-            profile[column] = safe_mode(reference_frame[column])
-    return profile
+    return (
+        model,
+        explainer,
+        bundle["pipeline"],
+        np.asarray(bundle["cohort_X"]),
+        np.asarray(bundle["cohort_y"]),
+        list(bundle["feature_names"]),
+        float(bundle["threshold"]),
+    )
 
 
 def score_patient(model, explainer, pipeline, feature_names, patient_frame: pd.DataFrame):
@@ -176,10 +190,11 @@ def render_waterfall(shap_values, title: str):
 
 
 def render_manual_predictor():
-    reference_frame = load_reference_frame()
-    admission_source_labels = load_admission_source_labels()
+    dashboard_bundle = load_dashboard_demo_bundle()
+    defaults = dashboard_bundle["form_defaults"]
+    form_options = dashboard_bundle["form_options"]
+    admission_source_labels = dashboard_bundle["admission_source_labels"]
     model, explainer, pipeline, _, _, feature_names, threshold = load_model_bundle()
-    defaults = build_default_profile(reference_frame)
 
     st.subheader("Quick Intake Form")
     st.caption(
@@ -196,31 +211,31 @@ def render_manual_predictor():
                 "Time in Hospital (days)",
                 1,
                 14,
-                clipped_default(reference_frame, "time_in_hospital", 1, 14),
+                clipped_default(defaults, "time_in_hospital", 1, 14),
             )
             number_inpatient = st.slider(
                 "Prior Inpatient Visits",
                 0,
                 10,
-                clipped_default(reference_frame, "number_inpatient", 0, 10),
+                clipped_default(defaults, "number_inpatient", 0, 10),
             )
             number_emergency = st.slider(
                 "Prior Emergency Visits",
                 0,
                 10,
-                clipped_default(reference_frame, "number_emergency", 0, 10),
+                clipped_default(defaults, "number_emergency", 0, 10),
             )
             number_outpatient = st.slider(
                 "Prior Outpatient Visits",
                 0,
                 20,
-                clipped_default(reference_frame, "number_outpatient", 0, 20),
+                clipped_default(defaults, "number_outpatient", 0, 20),
             )
             number_diagnoses = st.slider(
                 "Number of Diagnoses",
                 1,
                 16,
-                clipped_default(reference_frame, "number_diagnoses", 1, 16),
+                clipped_default(defaults, "number_diagnoses", 1, 16),
             )
 
         with col2:
@@ -228,51 +243,51 @@ def render_manual_predictor():
                 "Lab Procedures",
                 1,
                 120,
-                clipped_default(reference_frame, "num_lab_procedures", 1, 120),
+                clipped_default(defaults, "num_lab_procedures", 1, 120),
             )
             num_procedures = st.slider(
                 "Other Procedures",
                 0,
                 10,
-                clipped_default(reference_frame, "num_procedures", 0, 10),
+                clipped_default(defaults, "num_procedures", 0, 10),
             )
             num_medications = st.slider(
                 "Number of Medications",
                 1,
                 50,
-                clipped_default(reference_frame, "num_medications", 1, 50),
+                clipped_default(defaults, "num_medications", 1, 50),
             )
             num_active_medications = st.slider(
                 "Active Diabetes Medications",
                 0,
                 10,
-                clipped_default(reference_frame, "num_active_medications", 0, 10),
+                clipped_default(defaults, "num_active_medications", 0, 10),
             )
             polypharmacy_score = st.slider(
                 "Medication Change Burden",
                 0,
                 10,
-                clipped_default(reference_frame, "polypharmacy_score", 0, 10),
+                clipped_default(defaults, "polypharmacy_score", 0, 10),
             )
             elixhauser_score = st.slider(
                 "Comorbidity Score",
                 -5,
                 20,
-                clipped_default(reference_frame, "elixhauser_score", -5, 20),
+                clipped_default(defaults, "elixhauser_score", -5, 20),
             )
 
         with col3:
             discharge_category = st.selectbox(
                 "Discharge Category",
-                sorted(reference_frame["discharge_category"].dropna().unique()),
+                form_options["discharge_category"],
                 index=0,
             )
             admission_category = st.selectbox(
                 "Admission Category",
-                sorted(reference_frame["admission_category"].dropna().unique()),
+                form_options["admission_category"],
                 index=0,
             )
-            admission_source_options = sorted(reference_frame["admission_source_id"].dropna().astype(int).unique())
+            admission_source_options = form_options["admission_source_id"]
             default_source = int(round(float(defaults["admission_source_id"])))
             admission_source_id = st.selectbox(
                 "Admission Source",
@@ -284,22 +299,22 @@ def render_manual_predictor():
             )
             diag_1_group = st.selectbox(
                 "Primary Diagnosis Group",
-                sorted(reference_frame["diag_1_group"].dropna().unique()),
+                form_options["diag_1_group"],
                 index=0,
             )
             medical_specialty_grouped = st.selectbox(
                 "Medical Specialty",
-                sorted(reference_frame["medical_specialty_grouped"].dropna().unique()),
+                form_options["medical_specialty_grouped"],
                 index=0,
             )
             race = st.selectbox(
                 "Race",
-                sorted(reference_frame["race"].dropna().unique()),
+                form_options["race"],
                 index=0,
             )
             gender = st.selectbox(
                 "Gender",
-                sorted(reference_frame["gender"].dropna().unique()),
+                form_options["gender"],
                 index=0,
             )
 
@@ -411,7 +426,7 @@ def render_manual_predictor():
         contributions[["Feature", "Encoded Value", "SHAP Impact"]].style.format(
             {"Encoded Value": "{:.3f}", "SHAP Impact": "{:.3f}"}
         ),
-        use_container_width=True,
+        width="stretch",
     )
     render_waterfall(shap_values, "Manual patient explanation")
 
@@ -425,9 +440,7 @@ def render_cohort_explorer():
     patient_idx = st.slider("Select Patient Index ID", 0, max_index, min(10, max_index), 1)
 
     patient_data = X_test[patient_idx]
-    actual_outcome = (
-        "Readmitted < 30 Days" if y_test.iloc[patient_idx] == 1 else "Not Readmitted / > 30 Days"
-    )
+    actual_outcome = "Readmitted < 30 Days" if int(y_test[patient_idx]) == 1 else "Not Readmitted / > 30 Days"
     probability = float(model.predict_proba(patient_data.reshape(1, -1))[0, 1])
 
     st.subheader("Risk Assessment")
@@ -465,26 +478,30 @@ if page == "Overview":
     col3.metric("Baseline Readmission Rate", "11.2%")
 
     st.subheader("Model Performance Summary (Held-Out Test Set)")
-    metrics = load_metrics().round(4)
-    st.dataframe(
-        metrics.style.highlight_max(subset=["AUROC", "AUPRC", "F1"], color="lightgreen")
-    )
+    metrics = load_metrics()
+    if metrics is None:
+        render_missing_artifact_notice(METRICS_DIR / "model_comparison.csv", "Model comparison table")
+    else:
+        st.dataframe(
+            metrics.round(4).style.highlight_max(subset=["AUROC", "AUPRC", "F1"], color="lightgreen"),
+            width="stretch",
+        )
 
 elif page == "Model Performance":
     st.header("Global Model Performance")
 
     st.subheader("ROC and Precision-Recall Curves")
-    st.image(str(FIGURES_DIR / "roc_prc_comparison.png"), use_container_width=True)
+    render_artifact_image(FIGURES_DIR / "roc_prc_comparison.png", "ROC and precision-recall chart")
 
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Calibration (Reliability)")
         st.markdown("*Checking if predicted probabilities match actual frequencies.*")
-        st.image(str(FIGURES_DIR / "calibration_curve.png"), use_container_width=True)
+        render_artifact_image(FIGURES_DIR / "calibration_curve.png", "Calibration chart")
     with col2:
         st.subheader("Confusion Matrix (XGBoost)")
-        st.markdown("*Threshold selected with the project’s asymmetric clinical cost rule.*")
-        st.image(str(FIGURES_DIR / "xgboost_confusion_matrix.png"), use_container_width=True)
+        st.markdown("*Threshold selected with a count-based 5:1 false-negative to false-positive cost rule.*")
+        render_artifact_image(FIGURES_DIR / "xgboost_confusion_matrix.png", "Confusion matrix")
 
 elif page == "SHAP Explanations":
     st.header("SHAP Feature Explainability")
@@ -495,10 +512,10 @@ elif page == "SHAP Explanations":
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Global Feature Importance")
-        st.image(str(FIGURES_DIR / "shap_summary_bar.png"), use_container_width=True)
+        render_artifact_image(FIGURES_DIR / "shap_summary_bar.png", "Global SHAP bar chart")
     with col2:
         st.subheader("Directional Impact (Beeswarm)")
-        st.image(str(FIGURES_DIR / "shap_beeswarm.png"), use_container_width=True)
+        render_artifact_image(FIGURES_DIR / "shap_beeswarm.png", "SHAP beeswarm chart")
 
     st.subheader("Partial Dependence")
     st.markdown("Select a top predictor to see its isolated, non-linear effect on readmission risk:")
@@ -507,11 +524,20 @@ elif page == "SHAP Explanations":
     dep_names = [dep.stem.replace("shap_dependence_", "") for dep in deps]
     if dep_names:
         feature = st.selectbox("Select Feature", dep_names)
-        st.image(str(FIGURES_DIR / f"shap_dependence_{feature}.png"))
+        render_artifact_image(
+            FIGURES_DIR / f"shap_dependence_{feature}.png",
+            f"SHAP dependence chart for {feature}",
+        )
+    else:
+        st.info("No SHAP dependence plots were bundled with this deployment.")
 
 elif page == "Fairness Audit":
     st.header("Demographic Fairness Audit")
-    df_fairness = load_fairness().round(3)
+    df_fairness = load_fairness()
+    if df_fairness is None:
+        render_missing_artifact_notice(METRICS_DIR / "fairness_audit.csv", "Fairness audit table")
+        st.stop()
+    df_fairness = df_fairness.round(3)
 
     st.markdown(
         """
@@ -532,7 +558,7 @@ elif page == "Fairness Audit":
                 subset.style.background_gradient(subset=["TPR", "PPV"], cmap="Blues").highlight_min(
                     subset=["AUROC"], color="lightcoral"
                 ),
-                use_container_width=True,
+                width="stretch",
             )
 
             small_samples = subset[subset["N"] < 100]
@@ -553,5 +579,9 @@ elif page == "Interactive Predictor":
             render_manual_predictor()
         with cohort_tab:
             render_cohort_explorer()
+    except FileNotFoundError as exc:
+        st.error(str(exc))
+    except ValueError as exc:
+        st.error(f"Interactive predictor assets are invalid: {exc}")
     except Exception as exc:
         st.error(f"Dashboard assets are not ready yet. Check backend artifacts and models: {exc}")

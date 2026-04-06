@@ -2,7 +2,7 @@
 
 **One-Line Project Name:** Smart Diabetic Patient Readmission Risk Prediction System
 
-**One-Line Problem Statement:** Predict whether a diabetic patient is likely to be readmitted within 30 days using hospital encounter data so that high-risk cases can be identified earlier.
+**One-Line Problem Statement:** Hospitals face difficulty in identifying diabetic patients who are at high risk of 30-day readmission before discharge.
 
 ## OUTLINE
 
