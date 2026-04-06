@@ -36,9 +36,14 @@ def compute_optimal_threshold(
     false_positive_cost: float = 1.0,
 ) -> float:
     """
-    Select a probability threshold using a simple asymmetric clinical cost rule.
+    Select a probability threshold by minimizing expected misclassification burden.
+
+    The operating point is chosen from the observed score cutoffs plus a value
+    strictly greater than `1.0`, which lets the rule select an "alert nobody"
+    policy even when some predicted probabilities equal `1.0`.
     """
     candidate_thresholds = np.unique(np.asarray(y_prob, dtype=np.float64))
+    candidate_thresholds = np.append(candidate_thresholds, np.nextafter(1.0, 2.0))
     best_threshold = float(candidate_thresholds[0])
     best_cost = float("inf")
 
@@ -46,15 +51,10 @@ def compute_optimal_threshold(
         y_pred = (y_prob >= threshold).astype(np.int_)
         tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
 
-        false_negative_rate = fn / (fn + tp) if (fn + tp) > 0 else 0.0
-        false_positive_rate = fp / (fp + tn) if (fp + tn) > 0 else 0.0
-        cost = (
-            false_negative_cost * false_negative_rate
-            + false_positive_cost * false_positive_rate
-        )
+        cost = false_negative_cost * fn + false_positive_cost * fp
 
         if cost < best_cost:
-            best_cost = cost
+            best_cost = float(cost)
             best_threshold = float(threshold)
 
     return best_threshold

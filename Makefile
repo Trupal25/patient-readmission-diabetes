@@ -4,7 +4,7 @@ JUPYTER := .venv/bin/jupyter
 STREAMLIT := .venv/bin/streamlit
 PYTEST  := .venv/bin/pytest
 
-.PHONY: setup eda preprocess train evaluate dashboard test all clean help
+.PHONY: setup eda preprocess train evaluate dashboard dashboard-assets test all clean help
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -33,6 +33,9 @@ evaluate:  ## Run full evaluation suite
 	$(PYTHON) -m src.evaluation.metrics
 	$(PYTHON) -m src.evaluation.shap_analysis
 	$(PYTHON) -m src.evaluation.fairness
+	$(PYTHON) -m src.evaluation.dashboard_bundle
+
+dashboard-assets: evaluate  ## Build the deployable dashboard demo bundle
 
 dashboard:  ## Launch the Streamlit explainability dashboard
 	$(STREAMLIT) run dashboard/app.py
